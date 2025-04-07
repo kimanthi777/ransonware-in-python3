@@ -2,7 +2,7 @@ import random
 import os
 import threading
 import queue
-import socket
+// import socket
 
 # Encryption function that the threads will call
 def encrypt(key):

